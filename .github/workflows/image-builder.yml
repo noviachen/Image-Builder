@@ -1,0 +1,82 @@
+name: ImmortalWrt Image Builder
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+env:
+  PROFILE: generic
+  UCI_CUSTOM_FILE: uci-custom
+  PACKAGES_LIST_FILE: packages.list
+  PACKAGES_FOLDER: packages
+  DOWNLOAD_URL: https://downloads.immortalwrt.org/releases/23.05.3/targets/x86/64/immortalwrt-imagebuilder-23.05.3-x86-64.Linux-x86_64.tar.xz
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 qemu-utils genisoimage
+
+    - name: Download and extract Image Builder
+      run: |
+        wget -O /tmp/imagebuilder.tar.xz $DOWNLOAD_URL
+        sudo tar -C /tmp -xvf /tmp/imagebuilder.tar.xz
+
+    - name: Set Image Builder root directory
+      run: |
+        ROOT_DIRECTORY=$(basename $DOWNLOAD_URL .tar.xz)
+        echo "ROOT_DIRECTORY=/tmp/$ROOT_DIRECTORY" >> $GITHUB_ENV
+
+    - name: Modify .config file
+      run: |
+        CONFIG_FILE="$ROOT_DIRECTORY/.config"
+        # Disable iso and virtual disk image generation for x86
+        sudo sed -i 's/^CONFIG_ISO_IMAGES=y/# CONFIG_ISO_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_QCOW2_IMAGES=y/# CONFIG_QCOW2_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VDI_IMAGES=y/# CONFIG_VDI_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VMDK_IMAGES=y/# CONFIG_VMDK_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VHDX_IMAGES=y/# CONFIG_VHDX_IMAGES is not set/' $CONFIG_FILE
+
+    - name: Copy files
+      run: |
+        # Creator folders
+        sudo mkdir -p $ROOT_DIRECTORY/files/etc/uci-defaults
+        sudo mkdir -p $ROOT_DIRECTORY/packages
+        # Copy custom setting file
+        sudo cp $UCI_CUSTOM_FILE $ROOT_DIRECTORY/files/etc/uci-defaults
+        # Copy packages list
+        sudo cp $PACKAGES_LIST_FILE $ROOT_DIRECTORY/files/packages.list
+        # Copy ipk files
+        sudo cp $PACKAGES_FOLDER/*.ipk $ROOT_DIRECTORY/packages
+
+    - name: Compile firmware
+      run: |
+        cd $ROOT_DIRECTORY
+        PACKAGES=$(cat $ROOT_DIRECTORY/files/packages.list | tr '\n' ' ')
+        sudo make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES="files"
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        # Organize files
+        sudo mkdir -p /tmp/bin_firmware
+        sudo find bin -type f -exec sudo cp {} /tmp/bin_firmware/ \;
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: ImmortalWrt-firmware-${{ env.PROFILE }}-${{ env.FILE_DATE }}
+        path: /tmp/bin_firmware
+
+    - name: Delete workflow runs
+      uses: GitRML/delete-workflow-runs@main
+      with:
+        retain_days: 3
+        keep_minimum_runs: 3
