@@ -12,7 +12,7 @@
 # wan_device="eth0"
 #
 # ttyd_auto_login="/bin/login -f root"
-# shell="bash"
+# shell="/bin/bash"
 
 # log potential errors
 exec >/tmp/setup.log 2>&1
