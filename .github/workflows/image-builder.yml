@@ -47,8 +47,10 @@ jobs:
         sudo sed -i 's/^CONFIG_VDI_IMAGES=y/# CONFIG_VDI_IMAGES is not set/' $CONFIG_FILE
         sudo sed -i 's/^CONFIG_VMDK_IMAGES=y/# CONFIG_VMDK_IMAGES is not set/' $CONFIG_FILE
         sudo sed -i 's/^CONFIG_VHDX_IMAGES=y/# CONFIG_VHDX_IMAGES is not set/' $CONFIG_FILE
-        # Reconfigure the rootfs partition size for x86
-        sudo sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }}/g' $CONFIG_FILE
+        # Reconfigure the rootfs partition size (for x86 build only)
+        if [ -n "${{ env.ROOTFS_PARTSIZE }}" ] && [ "${{ env.PROFILE }}" = "generic" ]; then
+          sudo sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }}/g' $CONFIG_FILE
+        fi
 
     - name: Copy files
       run: |
