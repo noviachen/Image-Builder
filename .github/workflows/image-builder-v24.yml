@@ -1,0 +1,87 @@
+name: ImmortalWrt Image Builder (OpenWrt 24)
+on:
+  push:
+    branches: [ "master" ]
+  workflow_dispatch:
+
+env:
+  PROFILE: generic
+  UCI_CUSTOM_FILE: uci-custom
+  PACKAGES_LIST_FILE: packages.list
+  PACKAGES_FOLDER: packages
+  # ROOTFS_PARTSIZE: 512   # Reconfigure the rootfs partition size (for x86 build only), variable set in MB
+  DOWNLOAD_URL: https://downloads.immortalwrt.org/releases/24.10.0/targets/x86/64/immortalwrt-imagebuilder-24.10.0-x86-64.Linux-x86_64.tar.zst
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev zlib1g-dev gawk git gettext libssl-dev xsltproc wget unzip python3 qemu-utils genisoimage zstd
+
+    - name: Download and extract Image Builder
+      run: |
+        wget -O /tmp/imagebuilder.tar.zst $DOWNLOAD_URL
+        sudo tar -I zstd -C /tmp -xvf /tmp/imagebuilder.tar.zst
+
+    - name: Set Image Builder root directory
+      run: |
+        ROOT_DIRECTORY=$(basename $DOWNLOAD_URL .tar.zst)
+        echo "ROOT_DIRECTORY=/tmp/$ROOT_DIRECTORY" >> $GITHUB_ENV
+
+    - name: Modify .config file
+      run: |
+        CONFIG_FILE="$ROOT_DIRECTORY/.config"
+        # Disable iso and virtual disk image generation for x86
+        sudo sed -i 's/^CONFIG_ISO_IMAGES=y/# CONFIG_ISO_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_QCOW2_IMAGES=y/# CONFIG_QCOW2_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VDI_IMAGES=y/# CONFIG_VDI_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VMDK_IMAGES=y/# CONFIG_VMDK_IMAGES is not set/' $CONFIG_FILE
+        sudo sed -i 's/^CONFIG_VHDX_IMAGES=y/# CONFIG_VHDX_IMAGES is not set/' $CONFIG_FILE
+        # Reconfigure the rootfs partition size (for x86 build only)
+        if [ -n "${{ env.ROOTFS_PARTSIZE }}" ] && [ "${{ env.PROFILE }}" = "generic" ]; then
+          sudo sed -i 's/CONFIG_TARGET_ROOTFS_PARTSIZE=.*/CONFIG_TARGET_ROOTFS_PARTSIZE=${{ env.ROOTFS_PARTSIZE }}/g' $CONFIG_FILE
+        fi
+
+    - name: Copy files
+      run: |
+        # Creator folders
+        sudo mkdir -p $ROOT_DIRECTORY/files/etc/uci-defaults
+        sudo mkdir -p $ROOT_DIRECTORY/packages
+        # Copy custom setting file
+        sudo cp $UCI_CUSTOM_FILE $ROOT_DIRECTORY/files/etc/uci-defaults
+        # Copy packages list
+        sudo cp $PACKAGES_LIST_FILE $ROOT_DIRECTORY/files/packages.list
+        # Copy ipk files
+        sudo cp $PACKAGES_FOLDER/*.ipk $ROOT_DIRECTORY/packages
+
+    - name: Compile firmware
+      run: |
+        cd $ROOT_DIRECTORY
+        PACKAGES=$(cat $ROOT_DIRECTORY/files/packages.list | tr '\n' ' ')
+        sudo make image PROFILE="$PROFILE" PACKAGES="$PACKAGES" FILES="files"
+        echo "FILE_DATE=$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        # Organize files
+        sudo mkdir -p /tmp/bin_firmware
+        sudo find bin -type f -exec sudo cp {} /tmp/bin_firmware/ \;
+
+    - name: Upload firmware
+      uses: actions/upload-artifact@v4
+      with:
+        name: ImmortalWrt-firmware-${{ env.PROFILE }}-${{ env.FILE_DATE }}
+        path: /tmp/bin_firmware
+
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      with:
+        retain_days: 0
+        keep_minimum_runs: 2
